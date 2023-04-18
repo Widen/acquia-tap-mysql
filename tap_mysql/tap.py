@@ -5,13 +5,14 @@ from __future__ import annotations
 from singer_sdk import SQLTap
 from singer_sdk import typing as th
 
-# from tap_mysql.client import MySQLStream
+from tap_mysql.client import MySQLStream
 
 
 class TapMySQL(SQLTap):
     """MySQL tap class."""
 
     name = "tap-mysql"
+    default_stream_class = MySQLStream
 
     config_jsonschema = th.PropertiesList(
         th.Property(
