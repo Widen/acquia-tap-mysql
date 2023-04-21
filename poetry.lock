@@ -789,6 +789,20 @@ files = [
 ]
 
 [[package]]
+name = "mysql-replication"
+version = "0.31"
+description = "Pure Python Implementation of MySQL replication protocol build on top of PyMYSQL."
+category = "main"
+optional = false
+python-versions = "*"
+files = [
+    {file = "mysql-replication-0.31.tar.gz", hash = "sha256:4bc12beadb8aad99ba0eed497c62dd63a87752e09867771af7cb9c7c9ed3a3b1"},
+]
+
+[package.dependencies]
+pymysql = ">=0.10"
+
+[[package]]
 name = "packaging"
 version = "23.1"
 description = "Core utilities for Python packages"
@@ -1580,4 +1594,4 @@ s3 = ["fs-s3fs"]
 [metadata]
 lock-version = "2.0"
 python-versions = "<3.12,>=3.7.1"
-content-hash = "608f0db0954303c1f271d818007017542f51365cdf16941d07b38b71f50a4462"
+content-hash = "e9177e0160cf5a792b89ada05594d75567a6ce0ebeb05837d7403315352df80a"

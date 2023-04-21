@@ -5,7 +5,7 @@ from __future__ import annotations
 from singer_sdk import SQLTap
 from singer_sdk import typing as th
 
-from tap_mysql.client import MySQLStream
+from tap_mysql.streams import MySQLStream
 
 
 class TapMySQL(SQLTap):

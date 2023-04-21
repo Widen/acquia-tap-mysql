@@ -21,6 +21,9 @@ plugins:
     - name: user
     - name: password
       kind: password
+    metadata:
+      '*':
+        replication-method: LOG_BASED
   loaders:
   - name: target-jsonl
     variant: andyh1203

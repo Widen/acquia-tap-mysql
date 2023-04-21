@@ -5,14 +5,21 @@ This includes MySQLStream and MySQLConnector.
 
 from __future__ import annotations
 
-from typing import cast
+import random
+from typing import cast, Iterable, Optional, Tuple, Dict, List
 
 import sqlalchemy
-from singer_sdk import SQLConnector, SQLStream
+from singer_sdk import SQLConnector
 from singer_sdk import typing as th
 from singer_sdk._singerlib import CatalogEntry, MetadataMapping, Schema
 from sqlalchemy import text
-
+from pymysqlreplication import BinLogStreamReader
+from pymysqlreplication.event import RotateEvent
+from pymysqlreplication.row_event import (
+    DeleteRowsEvent,
+    UpdateRowsEvent,
+    WriteRowsEvent,
+)
 
 class MySQLConnector(SQLConnector):
     """Connects to the MySQL SQL source."""
@@ -103,25 +110,26 @@ class MySQLConnector(SQLConnector):
             """
             )
             result = connection.execute(query).fetchall()
-            instance_schema = {}
 
-            # Parse data into useable python objects
-            for row in result:
-                db_schema = row[0]
-                table = row[1]
-                column_def = {
-                    "name": row[3],
-                    "type": row[4],
-                    "nullable": row[5] == "YES",
-                    "key_type": row[6],
-                }
-                table_def = {"table_type": row[2], "columns": [column_def]}
-                if db_schema not in instance_schema:
-                    instance_schema[db_schema] = {table: table_def}
-                elif table not in instance_schema[db_schema]:
-                    instance_schema[db_schema][table] = table_def
-                else:
-                    instance_schema[db_schema][table]["columns"].append(column_def)
+        # Parse data into useable python objects
+        # todo: improve speed to match pipelinewise's variant
+        instance_schema = {}
+        for row in result:
+            db_schema = row[0]
+            table = row[1]
+            column_def = {
+                "name": row[3],
+                "type": row[4],
+                "nullable": row[5] == "YES",
+                "key_type": row[6],
+            }
+            table_def = {"table_type": row[2], "columns": [column_def]}
+            if db_schema not in instance_schema:
+                instance_schema[db_schema] = {table: table_def}
+            elif table not in instance_schema[db_schema]:
+                instance_schema[db_schema][table] = table_def
+            else:
+                instance_schema[db_schema][table]["columns"].append(column_def)
 
         return instance_schema
 
@@ -129,6 +137,8 @@ class MySQLConnector(SQLConnector):
         self, db_schema_name: str, table_name: str, table_def: dict
     ) -> CatalogEntry:
         """Create `CatalogEntry` object for the given table or a view.
+
+        Replaces `discover_catalog_entry` from base SQLConnector class.
 
         Args:
             db_schema_name: Name of the MySQL Schema being cataloged.
@@ -168,7 +178,7 @@ class MySQLConnector(SQLConnector):
                 ),
             )
         schema = table_schema.to_dict()
-        replication_method = self.config.get("replication_method") or "FULL_TABLE"
+        replication_method = next(iter(["LOG_BASED", "INCREMENTAL", "FULL_TABLE"]))
 
         return CatalogEntry(
             tap_stream_id=unique_stream_id,
@@ -210,26 +220,94 @@ class MySQLConnector(SQLConnector):
 
         return result
 
+    @staticmethod
+    def get_min_log_positions(tap_stream_id, state) -> Dict[str, Dict]:
+        min_log_positions = {}
 
-class MySQLStream(SQLStream):
-    """Stream class for MySQL streams."""
+        for _, bookmark in state.get('bookmarks', {}).items():
+            file = bookmark.get('log_file')
+            position = bookmark.get('log_pos')
 
-    connector_class = MySQLConnector
+            if not min_log_positions.get(file):
+                min_log_positions[file] = {
+                    'log_pos': position,
+                    'streams': [tap_stream_id]
+                }
 
-    # def get_records(self, partition: dict | None) -> Iterable[dict[str, Any]]:
-    #     """Return a generator of record-type dictionary objects.
-    #
-    #     Developers may optionally add custom logic before calling the default
-    #     implementation inherited from the base class.
-    #
-    #     Args:
-    #         partition: If provided, will read specifically from this data slice.
-    #
-    #     Yields:
-    #         One dict per record.
-    #     """
-    #     # Optionally, add custom logic instead of calling the super().
-    #     # This is helpful if the source database provides batch-optimized record
-    #     # retrieval.
-    #     # If no overrides or optimizations are needed, you may delete this method.
-    #     yield from super().get_records(partition)
+            elif min_log_positions[file]['log_pos'] > position:
+                min_log_positions[file]['log_pos'] = position
+                min_log_positions[file]['streams'].append(tap_stream_id)
+
+            else:
+                min_log_positions[file]['streams'].append(tap_stream_id)
+
+        return min_log_positions
+
+    def binlog_position(self, tap_stream_id: str, state: dict) -> Tuple[str, int, int]:
+        """Return the starting position of the log file and position.
+
+        Returns:
+            A tuple of the log file name and position respectively.
+        """
+        min_log_positions = self.get_min_log_positions(tap_stream_id, state)
+
+        with self._engine.connect() as connection:
+            results = connection.execute("SHOW BINARY LOGS").fetchall()
+
+        if results is None:
+            raise Exception("MySQL binary logging is not enabled.")
+        else:
+            results_dict = {log[0]: log[1] for log in results}
+            server_logs_set = set(results_dict.keys())
+            state_logs_set = set(min_log_positions.keys())
+            expired_logs = state_logs_set.difference(server_logs_set)
+
+            if expired_logs:
+                raise Exception(f"Unable to replicate bin log stream because the "
+                                f"following binary log(s) no longer exist: "
+                                f"{', '.join(expired_logs)}")
+
+            for log_file in sorted(server_logs_set):
+                end_pos: int = results_dict[log_file]
+                if min_log_positions.get(log_file):
+                    return log_file, min_log_positions[log_file]['log_pos'], end_pos
+                elif log_file:
+                    return log_file, 19, end_pos
+                else:
+                    raise Exception(
+                        "Unable to replicate binlog stream because no binary logs exist "
+                        "on the server."
+                    )
+
+    def create_binlog_reader(
+        self,
+        mysql_schema: Optional[str] = None,
+        tap_stream_id: Optional[List[str]] = None,
+        state: dict = None,
+    ) -> BinLogStreamReader:
+        """Yield binlog events.
+
+        Returns:
+            Iterable of binlog events
+        """
+        # Get starting binlog file and position
+        file, start_position, end_position = self.binlog_position(tap_stream_id, state)
+        if not file:
+            raise ValueError(f"Log file is invalid: '{file}'")
+        if not start_position or start_position < 0:
+            raise ValueError(f"Log position ('pos') is invalid: '{start_position}'")
+
+        # Get binlog files
+        settings = self.config.copy()
+        settings["port"] = int(settings["port"])
+
+        return BinLogStreamReader(
+            connection_settings=settings,
+            server_id=random.randint(1, 2 ^ 32),
+            report_slave="meltano",
+            only_events=[WriteRowsEvent, UpdateRowsEvent, DeleteRowsEvent, RotateEvent],
+            only_schemas=mysql_schema,
+            log_file=file,
+            log_pos=start_position,
+            resume_stream=True,
+        )
