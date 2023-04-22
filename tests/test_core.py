@@ -8,8 +8,10 @@ from tap_mysql.tap import TapMySQL
 
 
 SAMPLE_CONFIG = {
-    "start_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-    # TODO: Initialize minimal tap config
+    "host": "host_config",
+    "port": "3306",
+    "user": "user_config",
+    "password": "password_config",
 }
 
 

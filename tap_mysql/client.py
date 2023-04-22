@@ -5,13 +5,28 @@ This includes MySQLStream and MySQLConnector.
 
 from __future__ import annotations
 
-from typing import cast
+import collections
+import datetime
+import itertools
+from typing import Iterator, cast
 
 import sqlalchemy
 from singer_sdk import SQLConnector, SQLStream
 from singer_sdk import typing as th
 from singer_sdk._singerlib import CatalogEntry, MetadataMapping, Schema
 from sqlalchemy import text
+
+Column = collections.namedtuple(
+    "Column",
+    [
+        "table_schema",
+        "table_name",
+        "column_name",
+        "column_type",
+        "is_nullable",
+        "column_key",
+    ],
+)
 
 
 class MySQLConnector(SQLConnector):
@@ -73,60 +88,12 @@ class MySQLConnector(SQLConnector):
         # You may delete this method if overrides are not needed.
         return SQLConnector.to_sql_type(jsonschema_type)
 
-    def get_instance_schema(self) -> dict:
-        """Return list of data necessary to construct a complete catalog.
-
-        Returns:
-            dict
-        """
-        with self._engine.connect() as connection:
-            query = text(
-                """
-                SELECT c.table_schema,
-                       c.table_name,
-                       t.table_type,
-                       c.column_name,
-                       c.data_type,
-                       c.is_nullable,
-                       c.column_key
-                FROM information_schema.columns AS c
-                    LEFT JOIN information_schema.tables AS t
-                        ON c.table_name = t.table_name
-                WHERE c.table_schema NOT IN (
-                        'information_schema'
-                        , 'performance_schema'
-                        , 'mysql'
-                        , 'sys'
-                    )
-                ORDER BY table_schema, table_name, column_name
-                -- LIMIT 40
-            """
-            )
-            result = connection.execute(query).fetchall()
-            instance_schema = {}
-
-            # Parse data into useable python objects
-            for row in result:
-                db_schema = row[0]
-                table = row[1]
-                column_def = {
-                    "name": row[3],
-                    "type": row[4],
-                    "nullable": row[5] == "YES",
-                    "key_type": row[6],
-                }
-                table_def = {"table_type": row[2], "columns": [column_def]}
-                if db_schema not in instance_schema:
-                    instance_schema[db_schema] = {table: table_def}
-                elif table not in instance_schema[db_schema]:
-                    instance_schema[db_schema][table] = table_def
-                else:
-                    instance_schema[db_schema][table]["columns"].append(column_def)
-
-        return instance_schema
-
     def create_catalog_entry(
-        self, db_schema_name: str, table_name: str, table_def: dict
+        self,
+        db_schema_name: str,
+        table_name: str,
+        table_def: dict,
+        columns: Iterator[Column],
     ) -> CatalogEntry:
         """Create `CatalogEntry` object for the given table or a view.
 
@@ -134,6 +101,7 @@ class MySQLConnector(SQLConnector):
             db_schema_name: Name of the MySQL Schema being cataloged.
             table_name: Name of the MySQL Table being cataloged.
             table_def: A dict defining relevant elements of the table.
+            columns: list of named tuples describing the column.
 
         Returns:
             CatalogEntry
@@ -148,23 +116,19 @@ class MySQLConnector(SQLConnector):
         # Detect column properties
         primary_keys: list[str] = []
         table_schema = th.PropertiesList()
-        for column_def in table_def["columns"]:
-            column_name = column_def["name"]
-            key_type = column_def["key_type"]
-            is_nullable = column_def["nullable"]
-
-            if key_type == "PRI":
-                primary_keys.append(column_name)
+        for col in columns:
+            if col.column_key == "PRI":
+                primary_keys.append(col.column_name)
 
             # Initialize columns list
             jsonschema_type: dict = self.to_jsonschema_type(
-                cast(sqlalchemy.types.TypeEngine, column_def["type"]),
+                cast(sqlalchemy.types.TypeEngine, col.column_type),
             )
             table_schema.append(
                 th.Property(
-                    name=column_name,
+                    name=col.column_name,
                     wrapped=th.CustomType(jsonschema_type),
-                    required=not is_nullable,
+                    required=not col.is_nullable,
                 ),
             )
         schema = table_schema.to_dict()
@@ -176,7 +140,7 @@ class MySQLConnector(SQLConnector):
             table=table_name,
             key_properties=primary_keys,
             schema=Schema.from_dict(schema),
-            is_view=table_def["table_type"] == "VIEW",
+            is_view=table_def[db_schema_name][table_name]["is_view"] == "VIEW",
             replication_method=replication_method,  # Can be defined by user
             metadata=MetadataMapping.get_standard_metadata(
                 schema_name=db_schema_name,
@@ -199,16 +163,101 @@ class MySQLConnector(SQLConnector):
         Returns:
             The discovered catalog entries as a list.
         """
-        result: list[dict] = []
-        instance_schema = self.get_instance_schema()
+        self.logger.info(f"discover catalog start: {datetime.datetime.now()}")
+        entries: list[dict] = []
 
-        for schema_name, schema_def in instance_schema.items():
-            # Iterate through each tables and views
-            for table_name, table_def in schema_def.items():
-                entry = self.create_catalog_entry(schema_name, table_name, table_def)
-                result.append(entry.to_dict())
+        with self._engine.connect() as connection:
+            table_query = text(
+                """
+                SELECT
+                    table_schema
+                    , table_name
+                    , table_type
+                FROM information_schema.tables
+                WHERE table_schema NOT IN (
+                        'information_schema'
+                        , 'performance_schema'
+                        , 'mysql'
+                        , 'sys'
+                    )
+                ORDER BY table_schema, table_name
+                """
+            )
+            self.logger.info(f"start table query: {datetime.datetime.now()}")
+            table_results = connection.execute(table_query).fetchall()
+            self.logger.info(f"  end table query: {datetime.datetime.now()}")
+            table_defs: dict = {}
 
-        return result
+            for mysql_schema, table, table_type in table_results:
+                if mysql_schema not in table_defs:
+                    table_defs[mysql_schema] = {}
+
+                table_defs[mysql_schema][table] = {"is_view": table_type == "VIEW"}
+
+            col_query = text(
+                """
+                SELECT
+                    table_schema
+                    , table_name
+                    , column_name
+                    , column_type
+                    , is_nullable
+                    , column_key
+                FROM information_schema.columns
+                WHERE table_schema NOT IN (
+                        'information_schema'
+                        , 'performance_schema'
+                        , 'mysql'
+                        , 'sys'
+                    )
+                ORDER BY table_schema, table_name, column_name
+                -- LIMIT 40
+            """
+            )
+            self.logger.info(f"start col query: {datetime.datetime.now()}")
+            col_result = connection.execute(col_query)
+            self.logger.info(f"  end col query: {datetime.datetime.now()}")
+
+            # Parse data into useable python objects
+            columns = []
+            rec = col_result.fetchone()
+            while rec is not None:
+                columns.append(Column(*rec))
+                rec = col_result.fetchone()
+
+        for k, cols in itertools.groupby(
+            columns, lambda c: (c.table_schema, c.table_name)
+        ):
+            # cols = list(cols)
+            mysql_schema, table_name = k
+
+            entry = self.create_catalog_entry(
+                db_schema_name=mysql_schema,
+                table_name=table_name,
+                table_def=table_defs,
+                columns=cols,
+            )
+            entries.append(entry.to_dict())
+
+        # for row in result:
+        #     db_schema = row[0]
+        #     table = row[1]
+        #     column_def = {
+        #         "name": row[3],
+        #         "type": row[4],
+        #         "nullable": row[5] == "YES",
+        #         "key_type": row[6],
+        #     }
+        #     table_def = {"table_type": row[2], "columns": [column_def]}
+        #     if db_schema not in instance_schema:
+        #         instance_schema[db_schema] = {table: table_def}
+        #     elif table not in instance_schema[db_schema]:
+        #         instance_schema[db_schema][table] = table_def
+        #     else:
+        #         instance_schema[db_schema][table]["columns"].append(column_def)
+
+        self.logger.info(f"discover catalog end  : {datetime.datetime.now()}")
+        return entries
 
 
 class MySQLStream(SQLStream):
