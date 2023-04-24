@@ -22,7 +22,7 @@ Column = collections.namedtuple(
         "table_schema",
         "table_name",
         "column_name",
-        "data_type",
+        "column_type",
         "is_nullable",
         "column_key",
     ],
@@ -122,7 +122,7 @@ class MySQLConnector(SQLConnector):
 
             # Initialize columns list
             jsonschema_type: dict = self.to_jsonschema_type(
-                cast(sqlalchemy.types.TypeEngine, col.data_type),
+                cast(sqlalchemy.types.TypeEngine, col.column_type),
             )
             table_schema.append(
                 th.Property(
@@ -197,7 +197,7 @@ class MySQLConnector(SQLConnector):
                     table_schema
                     , table_name
                     , column_name
-                    , data_type
+                    , column_type
                     , is_nullable
                     , column_key
                 FROM information_schema.columns
