@@ -22,7 +22,7 @@ Column = collections.namedtuple(
         "table_schema",
         "table_name",
         "column_name",
-        "column_type",
+        "data_type",
         "is_nullable",
         "column_key",
     ],
@@ -122,7 +122,7 @@ class MySQLConnector(SQLConnector):
 
             # Initialize columns list
             jsonschema_type: dict = self.to_jsonschema_type(
-                cast(sqlalchemy.types.TypeEngine, col.column_type),
+                cast(sqlalchemy.types.TypeEngine, col.data_type),
             )
             table_schema.append(
                 th.Property(
@@ -163,7 +163,6 @@ class MySQLConnector(SQLConnector):
         Returns:
             The discovered catalog entries as a list.
         """
-        self.logger.info(f"discover catalog start: {datetime.datetime.now()}")
         entries: list[dict] = []
 
         with self._engine.connect() as connection:
@@ -183,9 +182,7 @@ class MySQLConnector(SQLConnector):
                 ORDER BY table_schema, table_name
                 """
             )
-            self.logger.info(f"start table query: {datetime.datetime.now()}")
             table_results = connection.execute(table_query).fetchall()
-            self.logger.info(f"  end table query: {datetime.datetime.now()}")
             table_defs: dict = {}
 
             for mysql_schema, table, table_type in table_results:
@@ -200,7 +197,7 @@ class MySQLConnector(SQLConnector):
                     table_schema
                     , table_name
                     , column_name
-                    , column_type
+                    , data_type
                     , is_nullable
                     , column_key
                 FROM information_schema.columns
@@ -214,9 +211,7 @@ class MySQLConnector(SQLConnector):
                 -- LIMIT 40
             """
             )
-            self.logger.info(f"start col query: {datetime.datetime.now()}")
             col_result = connection.execute(col_query)
-            self.logger.info(f"  end col query: {datetime.datetime.now()}")
 
             # Parse data into useable python objects
             columns = []
@@ -239,24 +234,6 @@ class MySQLConnector(SQLConnector):
             )
             entries.append(entry.to_dict())
 
-        # for row in result:
-        #     db_schema = row[0]
-        #     table = row[1]
-        #     column_def = {
-        #         "name": row[3],
-        #         "type": row[4],
-        #         "nullable": row[5] == "YES",
-        #         "key_type": row[6],
-        #     }
-        #     table_def = {"table_type": row[2], "columns": [column_def]}
-        #     if db_schema not in instance_schema:
-        #         instance_schema[db_schema] = {table: table_def}
-        #     elif table not in instance_schema[db_schema]:
-        #         instance_schema[db_schema][table] = table_def
-        #     else:
-        #         instance_schema[db_schema][table]["columns"].append(column_def)
-
-        self.logger.info(f"discover catalog end  : {datetime.datetime.now()}")
         return entries
 
 
