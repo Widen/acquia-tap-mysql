@@ -67,9 +67,10 @@ class MySQLConnector(SQLConnector):
         Returns:
             A compatible JSON Schema type definition.
         """
-        # Optionally, add custom logic before calling the parent SQLConnector method.
-        # You may delete this method if overrides are not needed.
-        return SQLConnector.to_jsonschema_type(from_type)
+        if from_type in ["bit", "bit(1)"]:
+            return {"type": ["boolean"]}
+        else:
+            return SQLConnector.to_jsonschema_type(from_type)
 
     @staticmethod
     def to_sql_type(jsonschema_type: dict) -> sqlalchemy.types.TypeEngine:
