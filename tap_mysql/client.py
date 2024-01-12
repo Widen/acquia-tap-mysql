@@ -254,6 +254,9 @@ class MySQLConnector(SQLConnector):
                     # inject the table_schema into the list of columns
                     custom_rec_keys = list(custom_rec.keys()) + ["mysql_schema"]
 
+                    # note that all columns are forced to be strings to avoid
+                    # the complexity of inferring their data types. Warning this could
+                    # cause issues in the loss of precision of data
                     custom_columns = []
                     for col in custom_rec_keys:
                         custom_columns.append(
@@ -375,6 +378,7 @@ class CustomMySQLStream(SQLStream):
         Returns:
             The resulting record dict, or `None` if the record should be excluded.
         """
+        # force all values to be strings for simplicity
         new_row = {k: str(v) for k, v in row.items()}
         # inject the mysql_schema into the record
         new_row["mysql_schema"] = self.mysql_schema
