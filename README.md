@@ -70,9 +70,9 @@ has the following properties:
 | Property     | Required | Default | Description                                                                                                                                                   |
 |:-------------|:--------:|:-------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | name         |   True   |  None   | The name of the custom stream.                                                                                                                                |
-| db_schemas   |  False   |  None   | An array of schema names of the MySQL instance that is being queried. The same query will be run against each schema.                                         |
+| db_schemas   |  False   |   []    | An array of schema names of the MySQL instance that is being queried. The same query will be run against each schema.                                         |
 | sql          |   True   |  None   | The custom sql query to use for this stream. If provided, the string `{db_schema}` will be replaced with the schema name(s) from the `db_schemas` property.}` |
-| primary_keys |  False   |  None   | The primary keys of the custom stream.                                                                                                                        |
+| primary_keys |  False   |   []    | The primary keys of the custom stream.                                                                                                                        |
 
 ### Configure using environment variables
 

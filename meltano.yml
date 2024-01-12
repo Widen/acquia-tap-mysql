@@ -25,18 +25,17 @@ plugins:
       kind: array
     config:
       custom_streams:
-      - name: example_table_name
+      - name: example_query_name
         db_schemas:
-          - example1
-          - example2
-        sql: SELECT * FROM {db_schema}.filesondisk LIMIT 5
-      - name: example_table_name2
+          - db_schema1
+          - db_schema2
+        sql: SELECT * FROM {db_schema}.table1 LIMIT 5
+      - name: example_query_name2
         db_schemas:
-          - example1
-        sql: SELECT * FROM example1.filesondisk LIMIT 5
+          - db_schema1
+        sql: SELECT * FROM db_schema1.table1 LIMIT 5
     select:
-      - '*-example_table_name.*'
-      - 'example1-example_table_name2.*'
+      - '*-storage_snapshot.*'
   loaders:
   - name: target-jsonl
     variant: andyh1203

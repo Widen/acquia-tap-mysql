@@ -21,20 +21,21 @@ class TapMySQL(SQLTap):
         th.Property(
             "name",
             th.StringType,
-            required=False,
+            required=True,
             description="The name of the custom stream",
         ),
         th.Property(
             "db_schemas",
             th.ArrayType(th.StringType),
             required=False,
+            default=[],
             description="An array of schema names of the MySQL instance that is being "
             "queried. The same query will be run against each schema.",
         ),
         th.Property(
             "sql",
             th.StringType,
-            required=False,
+            required=True,
             description="The custom sql query to use for this stream. If provided, the "
             "string `{db_schema}` will be replaced with the schema name(s) "
             "from the `db_schemas` property.}`",
