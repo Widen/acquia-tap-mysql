@@ -21,6 +21,22 @@ plugins:
     - name: user
     - name: password
       kind: password
+    - name: custom_streams
+      kind: array
+    config:
+      custom_streams:
+      - name: example_table_name
+        db_schemas:
+          - example1
+          - example2
+        sql: SELECT * FROM {db_schema}.filesondisk LIMIT 5
+      - name: example_table_name2
+        db_schemas:
+          - example1
+        sql: SELECT * FROM example1.filesondisk LIMIT 5
+    select:
+      - '*-example_table_name.*'
+      - 'example1-example_table_name2.*'
   loaders:
   - name: target-jsonl
     variant: andyh1203

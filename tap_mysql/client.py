@@ -6,8 +6,8 @@ This includes MySQLStream and MySQLConnector.
 from __future__ import annotations
 
 import collections
-import datetime
 import itertools
+import typing as t
 from typing import Iterator, cast
 
 import sqlalchemy
@@ -31,6 +31,9 @@ Column = collections.namedtuple(
 
 class MySQLConnector(SQLConnector):
     """Connects to the MySQL SQL source."""
+
+    def __init__(self, config: dict | None = None):
+        super().__init__(config, self.get_sqlalchemy_url(config))
 
     def get_sqlalchemy_url(cls, config: dict) -> str:
         """Concatenate a SQLAlchemy URL for use in connecting to the source.
@@ -167,6 +170,8 @@ class MySQLConnector(SQLConnector):
         entries: list[dict] = []
 
         with self._engine.connect() as connection:
+            # brake discovery into 2 queries for performance
+            # Get the table definition
             table_query = text(
                 """
                 SELECT
@@ -192,6 +197,7 @@ class MySQLConnector(SQLConnector):
 
                 table_defs[mysql_schema][table] = {"is_view": table_type == "VIEW"}
 
+            # Get the column definitions
             col_query = text(
                 """
                 SELECT
@@ -209,31 +215,65 @@ class MySQLConnector(SQLConnector):
                         , 'sys'
                     )
                 ORDER BY table_schema, table_name, column_name
-                -- LIMIT 40
             """
             )
             col_result = connection.execute(col_query)
 
-            # Parse data into useable python objects
+            # Parse data into useable python objects and append to entries
             columns = []
             rec = col_result.fetchone()
             while rec is not None:
                 columns.append(Column(*rec))
                 rec = col_result.fetchone()
 
-        for k, cols in itertools.groupby(
-            columns, lambda c: (c.table_schema, c.table_name)
-        ):
-            # cols = list(cols)
-            mysql_schema, table_name = k
+            for k, cols in itertools.groupby(
+                columns, lambda c: (c.table_schema, c.table_name)
+            ):
+                mysql_schema, table_name = k
 
-            entry = self.create_catalog_entry(
-                db_schema_name=mysql_schema,
-                table_name=table_name,
-                table_def=table_defs,
-                columns=cols,
-            )
-            entries.append(entry.to_dict())
+                entry = self.create_catalog_entry(
+                    db_schema_name=mysql_schema,
+                    table_name=table_name,
+                    table_def=table_defs,
+                    columns=cols,
+                )
+                entries.append(entry.to_dict())
+
+            # append custom stream catalog entries
+            custom_streams = self.config.get("custom_streams")
+            for stream_config in custom_streams:
+                for table_schema in stream_config.get("db_schemas"):
+                    table_name = stream_config.get("name")
+                    primary_keys = stream_config.get("primary_keys")
+
+                    query = text(
+                        stream_config.get("sql").replace("{db_schema}", table_schema)
+                    )
+                    custom_result = connection.execute(query)
+                    custom_rec = custom_result.fetchone()
+                    # inject the table_schema into the list of columns
+                    custom_rec_keys = list(custom_rec.keys()) + ["mysql_schema"]
+
+                    custom_columns = []
+                    for col in custom_rec_keys:
+                        custom_columns.append(
+                            Column(
+                                table_schema=table_schema,
+                                table_name=table_name,
+                                column_name=col,
+                                column_type="STRING",
+                                is_nullable="YES",
+                                column_key="PRI" if col in primary_keys else None,
+                            )
+                        )
+
+                    entry = self.create_catalog_entry(
+                        db_schema_name=table_schema,
+                        table_name=table_name,
+                        table_def={table_schema: {table_name: {"is_view": False}}},
+                        columns=iter(custom_columns),
+                    )
+                    entries.append(entry.to_dict())
 
         return entries
 
@@ -243,20 +283,99 @@ class MySQLStream(SQLStream):
 
     connector_class = MySQLConnector
 
-    # def get_records(self, partition: dict | None) -> Iterable[dict[str, Any]]:
-    #     """Return a generator of record-type dictionary objects.
-    #
-    #     Developers may optionally add custom logic before calling the default
-    #     implementation inherited from the base class.
-    #
-    #     Args:
-    #         partition: If provided, will read specifically from this data slice.
-    #
-    #     Yields:
-    #         One dict per record.
-    #     """
-    #     # Optionally, add custom logic instead of calling the super().
-    #     # This is helpful if the source database provides batch-optimized record
-    #     # retrieval.
-    #     # If no overrides or optimizations are needed, you may delete this method.
-    #     yield from super().get_records(partition)
+
+class CustomMySQLStream(SQLStream):
+    """Custom stream class for MySQL streams."""
+
+    connector_class = MySQLConnector
+    name = None
+    query = None
+
+    def __init__(
+        self,
+        tap,
+        catalog_entry: dict,
+        stream_config: dict,
+        mysql_schema: str,
+    ) -> None:
+        """Initialize the stream."""
+        super().__init__(
+            tap=tap,
+            catalog_entry=catalog_entry,
+        )
+        self.mysql_schema = mysql_schema
+        self.query = stream_config.get("sql").replace("{db_schema}", mysql_schema)
+
+    def get_records(self, context: dict | None) -> t.Iterable[dict[str, t.Any]]:
+        """Return a generator of record-type dictionary objects.
+
+        If the stream has a replication_key value defined, records will be sorted by the
+        incremental key. If the stream also has an available starting bookmark, the
+        records will be filtered for values greater than or equal to the bookmark value.
+
+        Args:
+            context: If partition context is provided, will read specifically from this
+                data slice.
+
+        Yields:
+            One dict per record.
+
+        Raises:
+            NotImplementedError: If partition is passed in context and the stream does
+                not support partitioning.
+        """
+        if context:
+            msg = f"Stream '{self.name}' does not support partitioning."
+            raise NotImplementedError(msg)
+
+        query = text(self.query)
+
+        if self.replication_key:
+            self.logger.info(
+                f"A replication key was provided but will be ignored for "
+                f"the custom stream '{self.tap_stream_id}'."
+            )
+
+        if self.ABORT_AT_RECORD_COUNT is not None:
+            # Limit record count to one greater than the abort threshold. This ensures
+            # `MaxRecordsLimitException` exception is properly raised by caller
+            # `Stream._sync_records()` if more records are available than can be
+            # processed.
+            query = query.limit(self.ABORT_AT_RECORD_COUNT + 1)
+
+        with self.connector._connect() as conn:  # noqa: SLF001
+            for record in conn.execute(query).mappings():
+                # TODO: Standardize record mapping type
+                # https://github.com/meltano/sdk/issues/2096
+                transformed_record = self.post_process(dict(record))
+                if transformed_record is None:
+                    # Record filtered out during post_process()
+                    continue
+                yield transformed_record
+
+    def post_process(
+        self,
+        row: dict,
+        context: dict | None = None,  # noqa: ARG002
+    ) -> dict | None:
+        """As needed, append or transform raw data to match expected structure.
+
+        Optional. This method gives developers an opportunity to "clean up" the results
+        prior to returning records to the downstream tap - for instance: cleaning,
+        renaming, or appending properties to the raw record result returned from the
+        API.
+
+        Developers may also return `None` from this method to filter out
+        invalid or not-applicable records from the stream.
+
+        Args:
+            row: Individual record in the stream.
+            context: Stream partition or context dictionary.
+
+        Returns:
+            The resulting record dict, or `None` if the record should be excluded.
+        """
+        new_row = {k: str(v) for k, v in row.items()}
+        # inject the mysql_schema into the record
+        new_row["mysql_schema"] = self.mysql_schema
+        return new_row
