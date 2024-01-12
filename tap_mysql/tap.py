@@ -91,9 +91,10 @@ class TapMySQL(SQLTap):
         result: list[Stream] = []
         custom_configs = self.config.get("custom_streams")
         custom_stream_names = []
-        for stream in custom_configs:
-            for db_schema in stream.get("db_schemas"):
-                custom_stream_names.append(f"{db_schema}-{stream['name']}")
+        if custom_configs:
+            for stream in custom_configs:
+                for db_schema in stream.get("db_schemas"):
+                    custom_stream_names.append(f"{db_schema}-{stream['name']}")
 
         for catalog_entry in self.catalog_dict["streams"]:
             stream_id = catalog_entry["tap_stream_id"]
@@ -113,7 +114,7 @@ class TapMySQL(SQLTap):
         return result
 
     # not supposed to do this but the logs of deselected streams are a drag
-    @final
+    @final  # type: ignore
     def sync_all(self) -> None:
         """Sync all streams."""
         self._reset_state_progress_markers()

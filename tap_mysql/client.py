@@ -32,7 +32,13 @@ Column = collections.namedtuple(
 class MySQLConnector(SQLConnector):
     """Connects to the MySQL SQL source."""
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict = {}):
+        """Initialize MySQL connector.
+
+        Args:
+            config: A dict with connection parameters
+
+        """
         super().__init__(config, self.get_sqlalchemy_url(config))
 
     def get_sqlalchemy_url(cls, config: dict) -> str:
@@ -241,42 +247,45 @@ class MySQLConnector(SQLConnector):
 
             # append custom stream catalog entries
             custom_streams = self.config.get("custom_streams")
-            for stream_config in custom_streams:
-                for table_schema in stream_config.get("db_schemas"):
-                    table_name = stream_config.get("name")
-                    primary_keys = stream_config.get("primary_keys")
+            if custom_streams:
+                for stream_config in custom_streams:
+                    for table_schema in stream_config.get("db_schemas"):
+                        table_name = stream_config.get("name")
+                        primary_keys = stream_config.get("primary_keys")
 
-                    query = text(
-                        stream_config.get("sql").replace("{db_schema}", table_schema)
-                    )
-                    custom_result = connection.execute(query)
-                    custom_rec = custom_result.fetchone()
-                    # inject the table_schema into the list of columns
-                    custom_rec_keys = list(custom_rec.keys()) + ["mysql_schema"]
-
-                    # note that all columns are forced to be strings to avoid
-                    # the complexity of inferring their data types. Warning this could
-                    # cause issues in the loss of precision of data
-                    custom_columns = []
-                    for col in custom_rec_keys:
-                        custom_columns.append(
-                            Column(
-                                table_schema=table_schema,
-                                table_name=table_name,
-                                column_name=col,
-                                column_type="STRING",
-                                is_nullable="YES",
-                                column_key="PRI" if col in primary_keys else None,
+                        query = text(
+                            stream_config.get("sql").replace(
+                                "{db_schema}", table_schema
                             )
                         )
+                        custom_result = connection.execute(query)
+                        custom_rec = custom_result.fetchone()
+                        # inject the table_schema into the list of columns
+                        custom_rec_keys = list(custom_rec.keys()) + ["mysql_schema"]
 
-                    entry = self.create_catalog_entry(
-                        db_schema_name=table_schema,
-                        table_name=table_name,
-                        table_def={table_schema: {table_name: {"is_view": False}}},
-                        columns=iter(custom_columns),
-                    )
-                    entries.append(entry.to_dict())
+                        # note that all columns are forced to be strings to avoid
+                        # the complexity of inferring their data types. Warning this
+                        # could cause issues in the loss of precision of data
+                        custom_columns = []
+                        for col in custom_rec_keys:
+                            custom_columns.append(
+                                Column(
+                                    table_schema=table_schema,
+                                    table_name=table_name,
+                                    column_name=col,
+                                    column_type="STRING",
+                                    is_nullable="YES",
+                                    column_key="PRI" if col in primary_keys else None,
+                                )
+                            )
+
+                        entry = self.create_catalog_entry(
+                            db_schema_name=table_schema,
+                            table_name=table_name,
+                            table_def={table_schema: {table_name: {"is_view": False}}},
+                            columns=iter(custom_columns),
+                        )
+                        entries.append(entry.to_dict())
 
         return entries
 
@@ -284,15 +293,15 @@ class MySQLConnector(SQLConnector):
 class MySQLStream(SQLStream):
     """Stream class for MySQL streams."""
 
-    connector_class = MySQLConnector
+    connector_class = MySQLConnector  # type: ignore
 
 
 class CustomMySQLStream(SQLStream):
     """Custom stream class for MySQL streams."""
 
-    connector_class = MySQLConnector
-    name = None
-    query = None
+    connector_class = MySQLConnector  # type: ignore
+    name = ""
+    query: str = ""
 
     def __init__(
         self,
@@ -301,13 +310,20 @@ class CustomMySQLStream(SQLStream):
         stream_config: dict,
         mysql_schema: str,
     ) -> None:
-        """Initialize the stream."""
+        """Initialize the stream.
+
+        Args:
+            tap: The tap object
+            catalog_entry: The Singer Catalog entry
+            stream_config: The portion of the config specific to this stream
+            mysql_schema: the MySQL schema to use for the stream
+        """
         super().__init__(
             tap=tap,
             catalog_entry=catalog_entry,
         )
         self.mysql_schema = mysql_schema
-        self.query = stream_config.get("sql").replace("{db_schema}", mysql_schema)
+        self.query = stream_config["sql"].replace("{db_schema}", mysql_schema)
 
     def get_records(self, context: dict | None) -> t.Iterable[dict[str, t.Any]]:
         """Return a generator of record-type dictionary objects.
@@ -344,7 +360,7 @@ class CustomMySQLStream(SQLStream):
             # `MaxRecordsLimitException` exception is properly raised by caller
             # `Stream._sync_records()` if more records are available than can be
             # processed.
-            query = query.limit(self.ABORT_AT_RECORD_COUNT + 1)
+            query = query.limit(self.ABORT_AT_RECORD_COUNT + 1)  # type: ignore
 
         with self.connector._connect() as conn:  # noqa: SLF001
             for record in conn.execute(query).mappings():
