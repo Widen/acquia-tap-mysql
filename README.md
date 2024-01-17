@@ -5,7 +5,7 @@
 Built with the [Meltano Tap SDK](https://sdk.meltano.com) for Singer Taps.
 
 The primary advantage of this version of `tap-mysql` is that it emphasizes and completes
-the `LOG_BASED` replication method, whereas other variants have buggy or incomplete 
+the `LOG_BASED` replication method, whereas other variants have buggy or incomplete
 implementations of such. Other advantages include inheriting the capabilities of a tap
 built on the Meltano Tap SDK.
 
@@ -34,14 +34,25 @@ pipx install git+https://github.com/ORG_NAME/tap-mysql.git@main
 ### Accepted Config Options
 
 <!--
-Developer TODO: Provide a list of config options accepted by the tap.
-
 This section can be created by copy-pasting the CLI output from:
 
 ```
 tap-mysql --about --format=markdown
 ```
 -->
+
+| Setting              | Required | Default | Description                                                                                                                                 |
+|:---------------------|:--------:|:-------:|:--------------------------------------------------------------------------------------------------------------------------------------------|
+| host                 |   True   |  None   | The hostname of the MySQL instance.                                                                                                         |
+| port                 |  False   |  3306   | The port number of the MySQL instance.                                                                                                      |
+| user                 |   True   |  None   | The username                                                                                                                                |
+| password             |   True   |  None   | The password for the user                                                                                                                   |
+| custom_streams       |  False   |  None   | An array of customized streams to use.                                                                                                      |
+| stream_maps          |  False   |  None   | Config object for stream maps capability. For more information check out [Stream Maps](https://sdk.meltano.com/en/latest/stream_maps.html). |
+| stream_map_config    |  False   |  None   | User-defined config values to be used within map expressions.                                                                               |
+| flattening_enabled   |  False   |  None   | 'True' to enable schema flattening and automatically expand nested properties.                                                              |
+| flattening_max_depth |  False   |  None   | The max depth to flatten schemas.                                                                                                           |
+| batch_config         |  False   |  None   |                                                                                                                                             |
 
 A full list of supported settings and capabilities for this
 tap is available by running:
@@ -50,10 +61,25 @@ tap is available by running:
 tap-mysql --about
 ```
 
+#### `custom_stream` configuration
+
+Custom streams are defined in the `custom_streams` configuration option. This option is
+an array of objects, each of which defines a custom stream. Each custom stream object
+has the following properties:
+
+| Property     | Required | Default | Description                                                                                                                                                   |
+|:-------------|:--------:|:-------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| name         |   True   |  None   | The name of the custom stream.                                                                                                                                |
+| db_schemas   |  False   |   []    | An array of schema names of the MySQL instance that is being queried. The same query will be run against each schema.                                         |
+| sql          |   True   |  None   | The custom sql query to use for this stream. If provided, the string `{db_schema}` will be replaced with the schema name(s) from the `db_schemas` property.}` |
+| primary_keys |  False   |   []    | The primary keys of the custom stream.                                                                                                                        |
+
 ### Configure using environment variables
 
-This Singer tap will automatically import any environment variables within the working directory's
-`.env` if the `--config=ENV` is provided, such that config values will be considered if a matching
+This Singer tap will automatically import any environment variables within the working
+directory's
+`.env` if the `--config=ENV` is provided, such that config values will be considered if
+a matching
 environment variable is set either in the terminal context or in the `.env` file.
 
 ### Source Authentication and Authorization
@@ -64,7 +90,8 @@ Developer TODO: If your tap requires special access on the source system, or any
 
 ## Usage
 
-You can easily run `tap-mysql` by itself or in a pipeline using [Meltano](https://meltano.com/).
+You can easily run `tap-mysql` by itself or in a pipeline
+using [Meltano](https://meltano.com/).
 
 ### Executing the Tap Directly
 
@@ -88,7 +115,7 @@ poetry install
 ### Create and Run Tests
 
 Create tests within the `tests` subfolder and
-  then run:
+then run:
 
 ```bash
 poetry run pytest
@@ -132,5 +159,6 @@ meltano elt tap-mysql target-jsonl
 
 ### SDK Dev Guide
 
-See the [dev guide](https://sdk.meltano.com/en/latest/dev_guide.html) for more instructions on how to use the SDK to
+See the [dev guide](https://sdk.meltano.com/en/latest/dev_guide.html) for more
+instructions on how to use the SDK to
 develop your own taps and targets.

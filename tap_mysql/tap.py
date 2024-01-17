@@ -7,7 +7,7 @@ from typing import final
 from singer_sdk import SQLTap, Stream
 from singer_sdk import typing as th
 
-from tap_mysql.client import MySQLStream
+from tap_mysql.client import CustomMySQLStream, MySQLStream
 
 
 class TapMySQL(SQLTap):
@@ -15,6 +15,39 @@ class TapMySQL(SQLTap):
 
     name = "tap-mysql"
     default_stream_class = MySQLStream
+    custom_stream_class = CustomMySQLStream
+
+    custom_stream_config = th.PropertiesList(
+        th.Property(
+            "name",
+            th.StringType,
+            required=True,
+            description="The name of the custom stream",
+        ),
+        th.Property(
+            "db_schemas",
+            th.ArrayType(th.StringType),
+            required=False,
+            default=[],
+            description="An array of schema names of the MySQL instance that is being "
+            "queried. The same query will be run against each schema.",
+        ),
+        th.Property(
+            "sql",
+            th.StringType,
+            required=True,
+            description="The custom sql query to use for this stream. If provided, the "
+            "string `{db_schema}` will be replaced with the schema name(s) "
+            "from the `db_schemas` property.}`",
+        ),
+        th.Property(
+            "primary_keys",
+            th.ArrayType(th.StringType),
+            default=[],
+            required=False,
+            description="The primary keys of the custom stream.",
+        ),
+    )
 
     config_jsonschema = th.PropertiesList(
         th.Property(
@@ -42,10 +75,47 @@ class TapMySQL(SQLTap):
             secret=True,
             description="The password for the user",
         ),
+        th.Property(
+            "custom_streams",
+            th.ArrayType(custom_stream_config),
+            required=False,
+            description="An array of customized streams to use.",
+        ),
     ).to_dict()
 
+    def discover_streams(self) -> list[Stream]:
+        """Initialize all available streams and return them as a list.
+
+        Returns:
+            List of discovered Stream objects.
+        """
+        result: list[Stream] = []
+        custom_configs = self.config.get("custom_streams")
+        custom_stream_names = []
+        if custom_configs:
+            for stream in custom_configs:
+                for db_schema in stream.get("db_schemas"):
+                    custom_stream_names.append(f"{db_schema}-{stream['name']}")
+
+        for catalog_entry in self.catalog_dict["streams"]:
+            stream_id = catalog_entry["tap_stream_id"]
+            # if it's a custom stream treat it differently
+            if stream_id in custom_stream_names:
+                for stream in custom_configs:
+                    for db_schema in stream.get("db_schemas"):
+                        if stream_id == f"{db_schema}-{stream['name']}":
+                            result.append(
+                                self.custom_stream_class(
+                                    self, catalog_entry, stream, db_schema
+                                )
+                            )
+            else:
+                result.append(self.default_stream_class(self, catalog_entry))
+
+        return result
+
     # not supposed to do this but the logs of deselected streams are a drag
-    @final
+    @final  # type: ignore
     def sync_all(self) -> None:
         """Sync all streams."""
         self._reset_state_progress_markers()
