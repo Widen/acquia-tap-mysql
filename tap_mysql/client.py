@@ -261,7 +261,7 @@ class MySQLConnector(SQLConnector):
                         custom_result = connection.execute(query)
                         custom_rec = custom_result.fetchone()
                         # inject the table_schema into the list of columns
-                        custom_rec_keys = list(custom_rec.keys()) + ["mysql_schema"]
+                        custom_rec_keys = list(custom_rec._fields) + ["mysql_schema"]
 
                         # note that all columns are forced to be strings to avoid
                         # the complexity of inferring their data types. Warning this
