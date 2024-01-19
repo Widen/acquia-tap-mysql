@@ -35,7 +35,7 @@ plugins:
           - db_schema1
         sql: SELECT * FROM db_schema1.table1 LIMIT 5
     select:
-      - '*-storage_snapshot.*'
+      - '*-example_query_name.*'
   loaders:
   - name: target-jsonl
     variant: andyh1203
