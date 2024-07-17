@@ -27,13 +27,9 @@ plugins:
       custom_streams:
       - name: example_query_name
         db_schemas:
-          - db_schema1
-          - db_schema2
-        sql: SELECT * FROM {db_schema}.table1 LIMIT 5
-      - name: example_query_name2
-        db_schemas:
-          - db_schema1
-        sql: SELECT * FROM db_schema1.table1 LIMIT 5
+          - lloyd
+          - testencryptedrds
+        sql: SELECT '2024-07-16 00:00:00 +0:00'                 AS snapshot_date , ag.displayname                  AS asset_group_name , ag.id                           AS asset_group_id , SUM(fileSize) / 1024 / 1024 / 1024   AS storage_amount FROM {db_schema}.filesondisk AS f JOIN {db_schema}.assetversion AS v ON f.id = v.originalFile JOIN {db_schema}.directorasset AS d ON v.parentAsset = d.id JOIN {db_schema}.assetgroupassignments AS aga ON d.id = aga.assetId JOIN {db_schema}.assetgroups AS ag ON aga.groupId = ag.id WHERE v.dateAdded < '2024-07-16 00:00:00 +0:00' AND (d.dateRemoved IS NULL OR d.dateRemoved > '2024-07-16 00:00:00 +0:00') GROUP BY 1,2,3
     select:
       - '*-example_query_name.*'
   loaders:
