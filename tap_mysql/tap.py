@@ -76,6 +76,13 @@ class TapMySQL(SQLTap):
             description="The password for the user",
         ),
         th.Property(
+            "schema",
+            th.StringType,
+            required=False,
+            default="mysql",
+            description="The default schema for the connection string.",
+        ),
+        th.Property(
             "custom_streams",
             th.ArrayType(custom_stream_config),
             required=False,

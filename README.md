@@ -47,6 +47,7 @@ tap-mysql --about --format=markdown
 | port                 |  False   |  3306   | The port number of the MySQL instance.                                                                                                      |
 | user                 |   True   |  None   | The username                                                                                                                                |
 | password             |   True   |  None   | The password for the user                                                                                                                   |
+| schema               |  False   |  mysql  | The default schema for the connection string.                                                                                               |
 | custom_streams       |  False   |  None   | An array of customized streams to use.                                                                                                      |
 | stream_maps          |  False   |  None   | Config object for stream maps capability. For more information check out [Stream Maps](https://sdk.meltano.com/en/latest/stream_maps.html). |
 | stream_map_config    |  False   |  None   | User-defined config values to be used within map expressions.                                                                               |

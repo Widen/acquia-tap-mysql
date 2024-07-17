@@ -55,7 +55,7 @@ class MySQLConnector(SQLConnector):
             f"{config['password']}@"
             f"{config['host']}:"
             f"{config['port']}/"
-            f"mysql"
+            f"{config['schema']}"
         )
 
     @staticmethod
