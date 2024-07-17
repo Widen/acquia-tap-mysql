@@ -260,6 +260,8 @@ class MySQLConnector(SQLConnector):
                         )
                         custom_result = connection.execute(query)
                         custom_rec = custom_result.fetchone()
+                        if not custom_rec:
+                            continue
                         # inject the table_schema into the list of columns
                         custom_rec_keys = list(custom_rec._fields) + ["mysql_schema"]
 
